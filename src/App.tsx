@@ -45,6 +45,20 @@ export default function App() {
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("gemini_api_key") || "");
+  const [showSettings, setShowSettings] = useState(false);
+  const [tempApiKey, setTempApiKey] = useState("");
+
+  const handleOpenSettings = () => {
+    setTempApiKey(apiKey);
+    setShowSettings(true);
+  };
+
+  const handleSaveSettings = () => {
+    setApiKey(tempApiKey);
+    localStorage.setItem("gemini_api_key", tempApiKey);
+    setShowSettings(false);
+  };
 
   const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -80,9 +94,15 @@ export default function App() {
 
     setResults(initialResults);
 
-    await Promise.allSettled(
-      initialResults.map(async (img, index) => {
+    for (let index = 0; index < initialResults.length; index++) {
+      const img = initialResults[index];
+      let attempts = 0;
+      const maxAttempts = 3;
+      let success = false;
+
+      while (attempts < maxAttempts && !success) {
         try {
+          attempts++;
           const url = await generateFoodImage(
             referenceImage.base64,
             referenceImage.mimeType,
@@ -91,6 +111,7 @@ export default function App() {
             settings.style,
             settings.tone,
             settings.appetisingMode,
+            apiKey
           );
 
           setResults((prev) => {
@@ -98,21 +119,38 @@ export default function App() {
             next[index] = { ...next[index], url, loading: false };
             return next;
           });
-        } catch (error) {
-          console.error(`Failed to generate ${img.angle}:`, error);
-          setResults((prev) => {
-            const next = [...prev];
-            next[index] = {
-              ...next[index],
-              error:
-                error instanceof Error ? error.message : "Failed to generate",
-              loading: false,
-            };
-            return next;
-          });
+          success = true;
+
+          // Add a delay between requests to help avoid rate limits
+          if (index < initialResults.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+        } catch (error: any) {
+          console.error(`Attempt ${attempts} failed for ${img.angle}:`, error);
+          
+          const isRateLimit = error.message?.includes('429') || error.message?.includes('RESOURCE_EXHAUSTED');
+          
+          if (isRateLimit && attempts < maxAttempts) {
+            // Wait longer for retry on rate limit
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            continue;
+          }
+
+          if (attempts === maxAttempts) {
+            setResults((prev) => {
+              const next = [...prev];
+              next[index] = {
+                ...next[index],
+                error:
+                  error instanceof Error ? error.message : "Failed to generate",
+                loading: false,
+              };
+              return next;
+            });
+          }
         }
-      }),
-    );
+      }
+    }
 
     setIsGenerating(false);
   };
@@ -136,6 +174,7 @@ export default function App() {
         settings.style,
         settings.tone,
         settings.appetisingMode,
+        apiKey
       );
 
       setResults((prev) => {
@@ -162,13 +201,72 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Camera className="w-6 h-6 text-orange-600" />
-            <h1 className="text-xl font-semibold tracking-tight">Plated</h1>
+            <h1 className="text-xl font-semibold tracking-tight">Food Photographer</h1>
           </div>
-          <div className="text-sm text-stone-500 font-medium">
-            AI Food Studio
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleOpenSettings}
+              className="px-3 py-1.5 text-sm font-medium text-stone-600 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 rounded-lg transition-colors flex items-center gap-2"
+            >
+              <Settings2 className="w-4 h-4" />
+              API Settings
+            </button>
+            <div className="text-sm text-stone-500 font-medium">
+              AI Food Studio
+            </div>
           </div>
         </div>
       </header>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold text-stone-900">Settings</h2>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="text-stone-400 hover:text-stone-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-stone-700 mb-1">
+                  Gemini API Key
+                </label>
+                <input
+                  type="password"
+                  value={tempApiKey}
+                  onChange={(e) => setTempApiKey(e.target.value)}
+                  placeholder="Enter your API key"
+                  className="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none"
+                />
+                <p className="text-xs text-stone-500 mt-1">
+                  Your key is stored locally in your browser.
+                </p>
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="px-4 py-2 text-sm font-medium text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveSettings}
+                  className="px-4 py-2 text-sm font-medium text-white bg-stone-900 hover:bg-stone-800 rounded-lg transition-colors"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

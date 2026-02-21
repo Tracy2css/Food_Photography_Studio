@@ -5,6 +5,7 @@ export interface GeneratedImage {
   url: string | null;
   loading: boolean;
   error: string | null;
+  statusMessage?: string;
 }
 
 export interface GenerationSettings {
